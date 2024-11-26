@@ -1,0 +1,92 @@
+---
+title: "Plots of predicted dropout probability"
+output: pdf_document
+---
+
+
+
+```{r echo=FALSE}
+library(here)
+library(ggplot2)
+cols <- c("#F26178", "#FFCC00")
+
+# Probit regression predicted probability plot by sample
+plot_dropout <- function(std_tab, term_str, seq_f, seq_t) {
+  xvals <- seq(seq_f, seq_t, 0.1)
+  
+  probit <- function(score, ELS) {
+    betas <- as.numeric(std_tab[c(1, 4, 7), term_str])
+    betas[1] + betas[2] * score + betas[3] * ELS
+  }
+  probit_lb_ub <- function(score, ELS) {
+    b0 <- as.numeric(strsplit(gsub("\\[|\\]", "", std_tab[c(3), term_str]), ",\\s*")[[1]])
+    b1 <- as.numeric(strsplit(gsub("\\[|\\]", "", std_tab[c(6), term_str]), ",\\s*")[[1]])
+    b2 <- as.numeric(strsplit(gsub("\\[|\\]", "", std_tab[c(9), term_str]), ",\\s*")[[1]])
+    list(b0[1] + b1[1] * score + b2[1] * ELS, b0[2] + b1[2] * score + b2[2] * ELS)
+  }
+  
+  # compute probabilities
+  els_probs <- pnorm(probit(xvals, ELS = rep(1, length(xvals))))
+  hsls_probs <- pnorm(probit(xvals, ELS = rep(0, length(xvals))))
+  pb_lb_ub_els <- probit_lb_ub(xvals, ELS = rep(1, length(xvals)))
+  pb_lb_ub_hsls <- probit_lb_ub(xvals, ELS = rep(0, length(xvals)))
+  els_probs_lb <- pnorm(pb_lb_ub_els[[1]])
+  els_probs_ub <- pnorm(pb_lb_ub_els[[2]])
+  hsls_probs_lb <- pnorm(pb_lb_ub_hsls[[1]])
+  hsls_probs_ub <- pnorm(pb_lb_ub_hsls[[2]])
+  
+  plot(xvals, els_probs, type = "n", xlab = "math self-efficacy", 
+       ylab = "P(dropout)", ylim = c(0, 1), bty = "l", font.main = 1,
+       main = paste0("Predicted Dropout Probability vs. Math Self-Efficacy (", 
+                     term_str, ")"))
+  lines(xvals, els_probs, type = "l", col = cols[1], lwd = 2)
+  lines(xvals, els_probs_lb, type = "l", col = cols[1], lwd = .7, lty = 2)
+  lines(xvals, els_probs_ub, type = "l", col = cols[1], lwd = .7, lty = 2)
+  lines(xvals, hsls_probs, type = "l", col = cols[2], lwd = 2)
+  lines(xvals, hsls_probs_lb, type = "l", col = cols[2], lwd =.7, lty = 2)
+  lines(xvals, hsls_probs_ub, type = "l", col = cols[2], lwd = .7, lty = 2)
+  legend("topright", title = "sample", legend = c("ELS", "HSLS"), lwd = 1.5, 
+         col = c(cols[1], cols[2]), lty = c(1,1), bty = "n", cex = 0.9)
+}
+tab_std <- readRDS(here("rds/probit_reg_table.rds"))# created in subsequent_analyses.R
+```
+
+```{r echo=FALSE}
+plot_dropout(tab_std, "AO-2S-PA", -2, 2)
+```
+
+Note: A probit regression model was used to predict the probability of dropout from sample membership and Bartlett factor scores (FS) for math self-efficacy. Following a two-stage path analysis (2S-PA) approach, FS were computed using the approximate invariance model determined via alignment optimization (AO) in the first stage to correct for measurement noninvariance. The scores were further corrected for unreliability in the second stage. The dotted lines indicate 95% confidence intervals. 
+
+\pagebreak
+
+```{r echo=FALSE}
+plot_dropout(tab_std, "MIM-2S-PA", -2, 2)
+```
+
+Note: A probit regression model was used to predict the probability of dropout from sample membership and Bartlett factor scores (FS) for math self-efficacy. Following a two-stage path analysis (2S-PA) approach, FS were computed using the partial invariance model determined via measuement invariance modeling (MIM) in the first stage to correct for measurement noninvariance. The scores were further corrected for unreliability in the second stage. The dotted lines indicate 95% confidence intervals.
+
+\pagebreak
+
+```{r echo=FALSE}
+plot_dropout(tab_std, "AO", -2, 2)
+```
+
+Note: A probit regression model was used to predict the probability of dropout from sample membership and Bartlett factor scores (FS) for math self-efficacy. FS were computed using the approximate invariance model determined via alignment optimization (AO). The scores were not corrected for unreliability. The dotted lines indicate 95% confidence intervals.
+\pagebreak
+
+```{r echo=FALSE}
+plot_dropout(tab_std, "MIM", -2, 2)
+```
+
+
+Note: A probit regression model was used to predict the probability of dropout from sample membership and Bartlett factor scores (FS) for math self-efficacy. FS were computed using the partial invariance model determined via measuement invariance modeling (MIM). The scores were not corrected for unreliability. The dotted lines indicate 95% confidence intervals.
+\pagebreak
+
+## Composite mean scores
+
+
+```{r echo=FALSE}
+
+plot_dropout(tab_std, "Mean Score", 0, 4)  
+```
+Note: A probit regression model was used to predict the probability of dropout from sample membership and composite mean scores of the math self-efficacy test items. The scores were not corrected for measurement error or unreliability. The dotted lines indicate 95% confidence intervals. x axis limits were adjusted to reflect the range of possible composite mean scores.

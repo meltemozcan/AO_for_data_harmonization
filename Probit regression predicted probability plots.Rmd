@@ -4,10 +4,9 @@ output: pdf_document
 ---
 
 
-
-```{r echo=FALSE}
-library(here)
+```{r echo=FALSE, message = FALSE}
 library(ggplot2)
+library(here)
 cols <- c("#F26178", "#FFCC00")
 
 # Probit regression predicted probability plot by sample
@@ -82,7 +81,6 @@ plot_dropout(tab_std, "MIM", -2, 2)
 Note: A probit regression model was used to predict the probability of dropout from sample membership and Bartlett factor scores (FS) for math self-efficacy. FS were computed using the partial invariance model determined via measuement invariance modeling (MIM). The scores were not corrected for unreliability. The dotted lines indicate 95% confidence intervals.
 \pagebreak
 
-## Composite mean scores
 
 
 ```{r echo=FALSE}

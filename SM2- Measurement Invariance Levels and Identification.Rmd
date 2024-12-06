@@ -1,0 +1,25 @@
+---
+title: "Overview of levels of measurement invariance and identification"
+#author: "Meltem Ozcan"
+output: pdf_document
+bibliography: bibliography.bib
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+::: {#tbl-MI apa-note="Levels of MI" tbl-colwidths="[25, 25, 30, 30, 40]"}
+| |Loadings | Intercepts | Uniqueness | Identification | Notes |
+|-----|-----|------|-----|------|-----|
+| Configural | Free | Free | Free | Set $\alpha = 0$ and $\psi = 1$ in both groups | | 
+| Metric | Constrained | Free | Free | Set $\alpha = 0$ in both groups, set $\psi = 1$ in group 1 and estimate $\psi$ freely in group 2 | | 
+| Scalar | Constrained | Constrained | Free |Set $\alpha = 0$ and $\psi = 1$ in group 1, estimate $\alpha$, $\psi$ freely in group 2 | Free the intercepts where loadings were freed| 
+| Strict | Constrained | Constrained | Constrained | Same as scalar | Any or all $\theta$ can be freed| 
+
+: Levels of measurement invariance
+:::
+
+See @putnick2016measurement, @millsap2011, @meredith2006essay, @widaman1997exploring, @van2015measurement, and @meredith1993measurement for additional information.
+
+\newpage
+### References

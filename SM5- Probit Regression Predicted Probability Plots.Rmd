@@ -1,0 +1,175 @@
+---
+title: "Plots of predicted dropout probability"
+output: pdf_document
+---
+
+```{r echo=FALSE, message = FALSE}
+library(ggplot2)
+library(umx)
+library(dplyr)
+library(here)
+source(here("code/table_helper_functions.R"))
+```
+
+```{r echo=FALSE, message = FALSE}
+models <- c("AO-2S-PA", "MIM-2S-PA", "AO", "MIM", "Mean Score")
+
+df <- readRDS(here("rds/score_df_continuous.rds"))
+df$dropout_f <- mxFactor(df$dropout, levels = c(0, 1))
+df$ELS <- 0
+df$ELS[df$sample=="ELS"] <- 1
+
+# prepare dataframes with the standardized self_efficacy variables 
+df_ao <- cbind(df[, c("dropout_f", "ELS")], "self_efficacy" = df$self_efficacy_ao_s)
+df_mim <- cbind(df[, c("dropout_f", "ELS")], "self_efficacy" = df$self_efficacy_mim_s)
+df_mn <- cbind(df[, c("dropout_f", "ELS")], "self_efficacy" = df$self_efficacy_mn_s)
+```
+
+```{r results= 'hide', warning = FALSE, message = FALSE, echo = FALSE}
+# 1 - NO RELIABILITY ADJUSTMENT (PA) ####
+umx_ao <- umxRAM("
+    dropout_f ~ self_efficacy + ELS
+    dropout_f ~ 0 * 1
+    dropout_f ~~ 1 * dropout_f", 
+    name = "probit regression (AO)", data = df_ao, tryHard = "yes")
+umx_mim <- umxRAM(
+   "dropout_f ~ self_efficacy + ELS
+    dropout_f ~ 0 * 1
+    dropout_f ~~ 1 * dropout_f", 
+    name = "probit regression (MIM)", data = df_mim, tryHard = "yes")
+umx_mn <- umxRAM(
+   "dropout_f ~ self_efficacy + ELS
+    dropout_f ~ 0 * 1
+    dropout_f ~~ 1 * dropout_f", 
+    name = "probit regression (Mean Scores)", data = df_mn, tryHard = "yes")
+
+# 2 - WITH RELIABILITY ADJUSTMENT (2S-PA) ####
+# drop rows with missing reliability
+df_a <- cbind(df[!is.na(df$approx_rel), ], 
+              "self_efficacy" = df[!is.na(df$approx_rel),"self_efficacy_ao_s"],
+              "self_efficacy_ev" = df[!is.na(df$approx_rel),"approx_ev"])
+df_p <- cbind(df[!is.na(df$partial_rel), ], 
+              "self_efficacy" = df[!is.na(df$partial_rel),"self_efficacy_mim_s"], 
+              "self_efficacy_ev" = df[!is.na(df$partial_rel),"partial_ev"])
+
+umx_tspa_ao <- umxRAM("2spa (AO)",
+  umxPath(c("math", "ELS"), to = "dropout_f"), # main effects
+  # loading = reliability (as definition variable) = 1 for Bartlett FS
+  umxPath("math", to = "self_efficacy", values = 1, free = FALSE),
+  # error variance (as definition variable), fs_SE^2
+  umxPath(var = "self_efficacy", labels = "data.self_efficacy_ev", free = FALSE),
+  umxPath(unique.pairs = c("math", "ELS")), # covariances of predictors
+  umxPath(means = c("math", "ELS")),  # means of predictors
+  umxPath(v1m0 = "dropout_f"), # for model identification, dropout_f ~ N(0, 1)
+  data = df_a, tryHard = "yes"
+)
+umx_tspa_mim <- umxRAM("2spa (MIM)",
+  umxPath(c("math", "ELS"), to = "dropout_f"), # main effects
+  # loading = reliability (as definition variable) = 1 for Bartlett FS
+  umxPath("math", to = "self_efficacy", values = 1, free = FALSE),
+  # error variance (as definition variable)
+  umxPath(var = "self_efficacy", labels = "data.self_efficacy_ev", free = FALSE),
+  umxPath(unique.pairs = c("math", "ELS")), # covariances of predictors
+  umxPath(means = c("math", "ELS")), # means of predictors
+  umxPath(v1m0 = "dropout_f"), # for model identification, dropout_f ~ N(0, 1)
+  data = df_p, tryHard = "yes"
+)
+```
+
+
+```{r echo=FALSE}
+cols <- c("#F26178", "#FFCC00")
+
+# Probit regression predicted probability plot by sample
+plot_dropout <- function(umx_out, approach, seq_f, seq_t, seq_by) {
+
+  if(approach == "AO-2S-PA" | approach == "MIM-2S-PA") {
+    terms <- c("dropout_f_dev1", "math_to_dropout_f", "ELS_to_dropout_f")
+  } else {
+    terms <- c("dropout_f_dev1", "self_efficacy_to_dropout_f", "ELS_to_dropout_f")
+  }
+  
+  # get path coefficients 
+  coefs <- get_path_ests_umx(terms, umx_out)
+  
+  # make predictions for self-efficacy scores of seq(-2, 2, 0.1)
+  new_self_eff <- seq(seq_f, seq_t, seq_by)
+  # construct design matrices w columns fosr intercept, self-efficacy, ELS
+  new_mat_els <- cbind(1, new_self_eff, rep(1, length(new_self_eff)))
+  new_mat_hsls <- cbind(1, new_self_eff, rep(0, length(new_self_eff)))
+  
+  # predictions: Xnew %*% beta_hat
+  els_preds <- new_mat_els %*% coefs[,1]
+  hsls_preds <- new_mat_hsls %*% coefs[,1]
+  
+  # Var(predicted y) = xnew %*% V(beta-hat) %*% t(xnew)
+  # SE = sqrt(Var(predicted y))
+  v_betahat <- vcov(umx_out)[terms, terms]
+  v_betahat[2:3, 1] <- -v_betahat[2:3, 1] # flip the signs 
+  v_betahat[1, 2:3] <- -v_betahat[1, 2:3]
+  
+  se_preds_els <- apply(new_mat_els, 1, function(row) {
+    row <- matrix(row, nrow = 1)
+    sqrt(row %*% v_betahat %*% t(row))
+  })
+  se_preds_hsls <- apply(new_mat_hsls, 1, function(row) {
+    row <- matrix(row, nrow = 1)
+    sqrt(row %*% v_betahat %*% t(row))
+  })
+  
+  lb_els <- els_preds - 1.96 * se_preds_els
+  ub_els <- els_preds + 1.96 * se_preds_els
+  lb_hsls <- hsls_preds - 1.96 * se_preds_hsls
+  ub_hsls <- hsls_preds + 1.96 * se_preds_hsls
+  
+  plot(new_self_eff, pnorm(els_preds), type = "n", xlab = "math self-efficacy", 
+       ylab = "P(dropout)", ylim = c(0, .2), bty = "l", font.main = 1,
+       main = paste0("Predicted Dropout Probability vs. Math Self-Efficacy (", 
+                     approach, ")"))
+  
+  lines(new_self_eff, pnorm(els_preds), type = "l", col = cols[1], lwd = 2)
+  lines(new_self_eff, pnorm(lb_els), type = "l", col = cols[1], lwd = 1, lty = 2)
+  lines(new_self_eff, pnorm(ub_els), type = "l", col = cols[1], lwd = 1, lty = 2)
+  
+  lines(new_self_eff, pnorm(hsls_preds), type = "l", col = cols[2], lwd = 2)
+  lines(new_self_eff, pnorm(lb_hsls), type = "l", col = cols[2], lwd = 1, lty = 2)
+  lines(new_self_eff, pnorm(ub_hsls), type = "l", col = cols[2], lwd = 1, lty = 2)
+}
+```
+
+
+
+```{r echo=FALSE, results='hide', message = FALSE}
+plot_dropout(umx_tspa_ao, "AO-2S-PA", -2, 2, 0.1)
+```
+
+Note: A probit regression model was used to predict the probability of dropout from sample membership and Bartlett factor scores (FS) for math self-efficacy. Following a two-stage path analysis (2S-PA) approach, FS were computed using the approximate invariance model determined via alignment optimization (AO) in the first stage to correct for measurement noninvariance. The scores were further corrected for unreliability in the second stage. The dotted lines indicate 95% confidence intervals. 
+
+\pagebreak
+```{r echo=FALSE, results='hide', message = FALSE}
+plot_dropout(umx_tspa_mim, "MIM-2S-PA", -2, 2, 0.1) 
+```
+
+Note: A probit regression model was used to predict the probability of dropout from sample membership and Bartlett factor scores (FS) for math self-efficacy. Following a two-stage path analysis (2S-PA) approach, FS were computed using the partial invariance model determined via measuement invariance modeling (MIM) in the first stage to correct for measurement noninvariance. The scores were further corrected for unreliability in the second stage. The dotted lines indicate 95% confidence intervals.
+
+\pagebreak
+
+```{r echo=FALSE, results='hide', message = FALSE}
+plot_dropout(umx_ao, "AO", -2, 2, 0.1)
+```
+
+Note: A probit regression model was used to predict the probability of dropout from sample membership and Bartlett factor scores (FS) for math self-efficacy. FS were computed using the approximate invariance model determined via alignment optimization (AO). The scores were not corrected for unreliability. The dotted lines indicate 95% confidence intervals.
+\pagebreak
+
+```{r echo=FALSE, results='hide', message = FALSE}
+plot_dropout(umx_mim, "MIM", -2, 2, 0.1)
+```
+
+
+Note: A probit regression model was used to predict the probability of dropout from sample membership and Bartlett factor scores (FS) for math self-efficacy. FS were computed using the partial invariance model determined via measuement invariance modeling (MIM). The scores were not corrected for unreliability. The dotted lines indicate 95% confidence intervals.
+\pagebreak
+
+```{r echo=FALSE, results='hide', message = FALSE}
+plot_dropout(umx_mn, "Mean Score", -2, 2, 0.1)  
+```
+Note: A probit regression model was used to predict the probability of dropout from sample membership and composite mean scores of the math self-efficacy test items. The scores were not corrected for measurement error or unreliability. The dotted lines indicate 95% confidence intervals.

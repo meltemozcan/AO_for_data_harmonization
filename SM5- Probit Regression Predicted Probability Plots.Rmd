@@ -8,13 +8,23 @@ library(ggplot2)
 library(umx)
 library(dplyr)
 library(here)
-source(here("code/table_helper_functions.R"))
+source(here("code/helper_functions.R"))
 ```
 
 ```{r echo=FALSE, message = FALSE}
 models <- c("AO-2S-PA", "MIM-2S-PA", "AO", "MIM", "Mean Score")
+terms_2spa <- c("dropout_f_dev1", "math_to_dropout_f", "ELS_to_dropout_f")
+terms_pa <- c("dropout_f_dev1", "self_efficacy_to_dropout_f", "ELS_to_dropout_f")
 
-df <- readRDS(here("rds/score_df_continuous.rds"))
+
+dir.create("rds", showWarnings = FALSE)
+if (!file.exists("rds/score_df_continuous.rds")) {
+  source(here("code/AO_MIM_Steps1through3.R"))
+  df <- readRDS(here("rds/score_df_continuous.rds"))
+} else {
+  df <- readRDS(here("rds/score_df_continuous.rds"))
+}
+
 df$dropout_f <- mxFactor(df$dropout, levels = c(0, 1))
 df$ELS <- 0
 df$ELS[df$sample=="ELS"] <- 1
@@ -84,9 +94,9 @@ cols <- c("#F26178", "#FFCC00")
 plot_dropout <- function(umx_out, approach, seq_f, seq_t, seq_by) {
 
   if(approach == "AO-2S-PA" | approach == "MIM-2S-PA") {
-    terms <- c("dropout_f_dev1", "math_to_dropout_f", "ELS_to_dropout_f")
+    terms <- terms_2spa
   } else {
-    terms <- c("dropout_f_dev1", "self_efficacy_to_dropout_f", "ELS_to_dropout_f")
+    terms <- terms_pa
   }
   
   # get path coefficients 
@@ -122,11 +132,13 @@ plot_dropout <- function(umx_out, approach, seq_f, seq_t, seq_by) {
   lb_hsls <- hsls_preds - 1.96 * se_preds_hsls
   ub_hsls <- hsls_preds + 1.96 * se_preds_hsls
   
+  if (approach == "Mean Score") approach = "CMS"
   plot(new_self_eff, pnorm(els_preds), type = "n", xlab = "math self-efficacy", 
-       ylab = "P(dropout)", ylim = c(0, .2), bty = "l", font.main = 1,
+       ylab = "P(dropout)", ylim = c(0, .2), bty = "l", font.main = 1, cex.main = 1.1,
        main = paste0("Predicted Dropout Probability vs. Math Self-Efficacy (", 
                      approach, ")"))
-  
+  legend("topright", title = "sample", legend = c("ELS", "HSLS"), lwd = 1.5, 
+         col = c(cols[1], cols[2]), lty = c(1,1), bty = "n", cex = 0.9)
   lines(new_self_eff, pnorm(els_preds), type = "l", col = cols[1], lwd = 2)
   lines(new_self_eff, pnorm(lb_els), type = "l", col = cols[1], lwd = 1, lty = 2)
   lines(new_self_eff, pnorm(ub_els), type = "l", col = cols[1], lwd = 1, lty = 2)
@@ -172,4 +184,111 @@ Note: A probit regression model was used to predict the probability of dropout f
 ```{r echo=FALSE, results='hide', message = FALSE}
 plot_dropout(umx_mn, "Mean Score", -2, 2, 0.1)  
 ```
-Note: A probit regression model was used to predict the probability of dropout from sample membership and composite mean scores of the math self-efficacy test items. The scores were not corrected for measurement error or unreliability. The dotted lines indicate 95% confidence intervals.
+Note: A probit regression model was used to predict the probability of dropout from sample membership and composite mean scores (CMS) of the math self-efficacy test items. The scores were not corrected for measurement error or unreliability. The dotted lines indicate 95% confidence intervals.
+
+## Comparing 2S-PA vs. PA approaches
+
+The plots below illustrate predicted dropout probabilities computed using Bartlett factor scores corrected for measurement bias and unreliability following a two-stage path analysis (2S-PA) approach after AO or MIM or Bartlett factor scores corrected only for measurement bias after AO or MIM (PA) in the ELS and HSLS samples. The dotted lines indicate 95% confidence intervals.
+
+```{r results = FALSE, message=FALSE, echo=FALSE}
+cols <- c("#3498db","#16a085")
+cols_tspa <- c("#9b59b6" , "#D63F8D")
+
+# umx_out: output from umxRAM()
+pa_vs_2spa_preds <- function (umx_out, terms) {
+  # Make predictions for self-efficacy scores of seq(-2, 2, 0.1)
+  new_self_eff <- seq(-2, 2, 0.1)
+  # construct design matrices w columns for intercept, self-efficacy, ELS
+  new_mat_els <- cbind(1, new_self_eff, rep(1, length(new_self_eff)))
+  new_mat_hsls <- cbind(1, new_self_eff, rep(0, length(new_self_eff)))
+  
+  umx_est_df <- get_path_ests_umx(terms, umx_out)
+  
+  # predictions: Xnew %*% beta_hat
+  els_preds <- new_mat_els %*% umx_est_df[,1]
+  hsls_preds <- new_mat_hsls %*% umx_est_df[,1]
+  
+  # Var(predicted y) = xnew %*% V(beta-hat) %*% t(xnew)
+  v_betahat <- vcov(umx_out)[terms, terms]
+  v_betahat[2:3, 1] <- -v_betahat[2:3, 1] # flip the signs 
+  v_betahat[1, 2:3] <- -v_betahat[1, 2:3]
+  v_betahat 
+  
+  se_preds_els <- apply(new_mat_els, 1, function(row) {
+    row <- matrix(row, nrow = 1)
+    sqrt(row %*% v_betahat %*% t(row))
+  })
+  se_preds_hsls <- apply(new_mat_hsls, 1, function(row) {
+    row <- matrix(row, nrow = 1)
+    sqrt(row %*% v_betahat %*% t(row))
+  })
+  
+  lb_els <- els_preds- 1.96 * se_preds_els
+  ub_els <- els_preds + 1.96 * se_preds_els
+  lb_hsls <- hsls_preds - 1.96 * se_preds_hsls
+  ub_hsls <- hsls_preds + 1.96 * se_preds_hsls
+
+  return(list("new_self_eff" = new_self_eff, "els_preds" = els_preds, 
+              "hsls_preds" = hsls_preds, "lb_els" = lb_els, "ub_els" = ub_els,
+              "lb_hsls" = lb_hsls, "ub_hsls" = ub_hsls))
+}
+
+ao_pa_preds <- pa_vs_2spa_preds(umx_ao, terms_pa)
+ao_tspa_preds <- pa_vs_2spa_preds(umx_tspa_ao, terms_2spa)
+mim_pa_preds <- pa_vs_2spa_preds(umx_mim, terms_pa)
+mim_tspa_preds <- pa_vs_2spa_preds(umx_tspa_mim, terms_2spa)
+```
+
+
+```{r results = FALSE, message=FALSE, echo=FALSE}
+plot_preds_els_or_hsls <- function(out_pa, out_tspa, ELS, legendtext) {
+  if (ELS == TRUE) {
+    preds_pa <- out_pa$els_preds
+    lb_pa <- out_pa$lb_els
+    ub_pa <- out_pa$ub_els
+    preds_tspa <- out_tspa$els_preds
+    lb_tspa <- out_tspa$lb_els
+    ub_tspa <- out_tspa$ub_els
+    col_ind <- 1
+    sample <- "ELS"
+  } else {
+    preds_pa <- out_pa$hsls_preds
+    lb_pa <- out_pa$lb_hsls
+    ub_pa <- out_pa$ub_hsls
+    preds_tspa <- out_tspa$hsls_preds
+    lb_tspa <- out_tspa$lb_hsls
+    ub_tspa <- out_tspa$ub_hsls
+    col_ind <- 2
+    sample <- "HSLS"
+  }
+  
+  plot(out_pa$new_self_eff, pnorm(preds_pa), type = "n", xlab = "math self-efficacy", 
+       ylab = "P(dropout)", ylim = c(0, .2), bty = "l", font.main = 1, cex.main = 1,
+       main = paste0("Predicted Dropout Probability vs. Math Self-Efficacy in ", sample))
+  legend("topright", title = "Approach", legend = legendtext, lwd = 1.5, 
+         col = c(cols[1], cols_tspa[1]), lty = c(1,1), bty = "n", cex = 0.9)
+  lines(out_pa$new_self_eff, pnorm(preds_pa), type = "l", col = cols[col_ind], lwd = 2)
+  lines(out_pa$new_self_eff, pnorm(lb_pa), type = "l", col = cols[col_ind], lwd = 1, lty = 3)
+  lines(out_pa$new_self_eff, pnorm(ub_pa), type = "l", col = cols[col_ind], lwd = 1, lty = 3)
+  lines(out_pa$new_self_eff, pnorm(preds_tspa), type = "l", col = cols_tspa[col_ind], lwd = 2)
+  lines(out_pa$new_self_eff, pnorm(lb_tspa), type = "l", col = cols_tspa[col_ind], lwd = 1, lty = 3)
+  lines(out_pa$new_self_eff, pnorm(ub_tspa), type = "l", col = cols_tspa[col_ind], lwd = 1, lty = 3)
+}
+```
+
+```{r echo=FALSE}
+plot_preds_els_or_hsls(ao_pa_preds, ao_tspa_preds, ELS = TRUE, legendtext = c("AO", "AO-2S-PA"))
+```
+
+```{r echo=FALSE}
+plot_preds_els_or_hsls(ao_pa_preds, ao_tspa_preds, ELS = FALSE, legendtext = c("AO", "AO-2S-PA"))
+```
+
+
+```{r echo=FALSE}
+plot_preds_els_or_hsls(mim_pa_preds, mim_tspa_preds, ELS = TRUE, legendtext = c("MIM", "MIM-2S-PA"))
+```
+
+```{r echo=FALSE}
+plot_preds_els_or_hsls(mim_pa_preds, mim_tspa_preds, ELS = FALSE, legendtext = c("MIM", "MIM-2S-PA"))
+```

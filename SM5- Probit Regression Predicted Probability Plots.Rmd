@@ -9,81 +9,14 @@ library(umx)
 library(dplyr)
 library(here)
 source(here("code/helper_functions.R"))
+source(here("code/subsequent_analyses.R"))
 ```
 
 ```{r echo=FALSE, message = FALSE}
 models <- c("AO-2S-PA", "MIM-2S-PA", "AO", "MIM", "Mean Score")
-terms_2spa <- c("dropout_f_dev1", "math_to_dropout_f", "ELS_to_dropout_f")
-terms_pa <- c("dropout_f_dev1", "self_efficacy_to_dropout_f", "ELS_to_dropout_f")
-
-
-dir.create("rds", showWarnings = FALSE)
-if (!file.exists("rds/score_df_continuous.rds")) {
-  source(here("code/AO_MIM_Steps1through3.R"))
-  df <- readRDS(here("rds/score_df_continuous.rds"))
-} else {
-  df <- readRDS(here("rds/score_df_continuous.rds"))
-}
-
-df$dropout_f <- mxFactor(df$dropout, levels = c(0, 1))
-df$ELS <- 0
-df$ELS[df$sample=="ELS"] <- 1
-
-# prepare dataframes with the standardized self_efficacy variables 
-df_ao <- cbind(df[, c("dropout_f", "ELS")], "self_efficacy" = df$self_efficacy_ao_s)
-df_mim <- cbind(df[, c("dropout_f", "ELS")], "self_efficacy" = df$self_efficacy_mim_s)
-df_mn <- cbind(df[, c("dropout_f", "ELS")], "self_efficacy" = df$self_efficacy_mn_s)
-```
-
-```{r results= 'hide', warning = FALSE, message = FALSE, echo = FALSE}
-# 1 - NO RELIABILITY ADJUSTMENT (PA) ####
-umx_ao <- umxRAM("
-    dropout_f ~ self_efficacy + ELS
-    dropout_f ~ 0 * 1
-    dropout_f ~~ 1 * dropout_f", 
-    name = "probit regression (AO)", data = df_ao, tryHard = "yes")
-umx_mim <- umxRAM(
-   "dropout_f ~ self_efficacy + ELS
-    dropout_f ~ 0 * 1
-    dropout_f ~~ 1 * dropout_f", 
-    name = "probit regression (MIM)", data = df_mim, tryHard = "yes")
-umx_mn <- umxRAM(
-   "dropout_f ~ self_efficacy + ELS
-    dropout_f ~ 0 * 1
-    dropout_f ~~ 1 * dropout_f", 
-    name = "probit regression (Mean Scores)", data = df_mn, tryHard = "yes")
-
-# 2 - WITH RELIABILITY ADJUSTMENT (2S-PA) ####
-# drop rows with missing reliability
-df_a <- cbind(df[!is.na(df$approx_rel), ], 
-              "self_efficacy" = df[!is.na(df$approx_rel),"self_efficacy_ao_s"],
-              "self_efficacy_ev" = df[!is.na(df$approx_rel),"approx_ev"])
-df_p <- cbind(df[!is.na(df$partial_rel), ], 
-              "self_efficacy" = df[!is.na(df$partial_rel),"self_efficacy_mim_s"], 
-              "self_efficacy_ev" = df[!is.na(df$partial_rel),"partial_ev"])
-
-umx_tspa_ao <- umxRAM("2spa (AO)",
-  umxPath(c("math", "ELS"), to = "dropout_f"), # main effects
-  # loading = reliability (as definition variable) = 1 for Bartlett FS
-  umxPath("math", to = "self_efficacy", values = 1, free = FALSE),
-  # error variance (as definition variable), fs_SE^2
-  umxPath(var = "self_efficacy", labels = "data.self_efficacy_ev", free = FALSE),
-  umxPath(unique.pairs = c("math", "ELS")), # covariances of predictors
-  umxPath(means = c("math", "ELS")),  # means of predictors
-  umxPath(v1m0 = "dropout_f"), # for model identification, dropout_f ~ N(0, 1)
-  data = df_a, tryHard = "yes"
-)
-umx_tspa_mim <- umxRAM("2spa (MIM)",
-  umxPath(c("math", "ELS"), to = "dropout_f"), # main effects
-  # loading = reliability (as definition variable) = 1 for Bartlett FS
-  umxPath("math", to = "self_efficacy", values = 1, free = FALSE),
-  # error variance (as definition variable)
-  umxPath(var = "self_efficacy", labels = "data.self_efficacy_ev", free = FALSE),
-  umxPath(unique.pairs = c("math", "ELS")), # covariances of predictors
-  umxPath(means = c("math", "ELS")), # means of predictors
-  umxPath(v1m0 = "dropout_f"), # for model identification, dropout_f ~ N(0, 1)
-  data = df_p, tryHard = "yes"
-)
+terms_2spa <- c("one_to_dropout_f", "latent_self_efficacy_to_dropout_f", "ELS_to_dropout_f")
+terms_pa <- c("one_to_dropout_f", "self_efficacy_to_dropout_f", "ELS_to_dropout_f")
+probit_tb <- readRDS(here("rds/probit_reg_table_std.rds"))
 ```
 
 
@@ -91,7 +24,7 @@ umx_tspa_mim <- umxRAM("2spa (MIM)",
 cols <- c("#F26178", "#FFCC00")
 
 # Probit regression predicted probability plot by sample
-plot_dropout <- function(umx_out, approach, seq_f, seq_t, seq_by) {
+plot_dropout <- function(v_betahat, approach, seq_f, seq_t, seq_by) {
 
   if(approach == "AO-2S-PA" | approach == "MIM-2S-PA") {
     terms <- terms_2spa
@@ -100,7 +33,7 @@ plot_dropout <- function(umx_out, approach, seq_f, seq_t, seq_by) {
   }
   
   # get path coefficients 
-  coefs <- get_path_ests_umx(terms, umx_out)
+  coefs <- as.numeric(probit_tb[c(1, 4, 7), approach])
   
   # make predictions for self-efficacy scores of seq(-2, 2, 0.1)
   new_self_eff <- seq(seq_f, seq_t, seq_by)
@@ -109,15 +42,12 @@ plot_dropout <- function(umx_out, approach, seq_f, seq_t, seq_by) {
   new_mat_hsls <- cbind(1, new_self_eff, rep(0, length(new_self_eff)))
   
   # predictions: Xnew %*% beta_hat
-  els_preds <- new_mat_els %*% coefs[,1]
-  hsls_preds <- new_mat_hsls %*% coefs[,1]
+  els_preds <- new_mat_els %*% coefs#[,1]
+  hsls_preds <- new_mat_hsls %*% coefs#[,1]
   
   # Var(predicted y) = xnew %*% V(beta-hat) %*% t(xnew)
   # SE = sqrt(Var(predicted y))
-  v_betahat <- vcov(umx_out)[terms, terms]
-  v_betahat[2:3, 1] <- -v_betahat[2:3, 1] # flip the signs 
-  v_betahat[1, 2:3] <- -v_betahat[1, 2:3]
-  
+  v_betahat <- v_betahat[terms, terms]
   se_preds_els <- apply(new_mat_els, 1, function(row) {
     row <- matrix(row, nrow = 1)
     sqrt(row %*% v_betahat %*% t(row))
@@ -152,37 +82,37 @@ plot_dropout <- function(umx_out, approach, seq_f, seq_t, seq_by) {
 
 
 ```{r echo=FALSE, results='hide', message = FALSE}
-plot_dropout(umx_tspa_ao, "AO-2S-PA", -2, 2, 0.1)
+plot_dropout(vcov(tspa_ao_fit), "AO-2S-PA", -2, 2, 0.1)
 ```
 
 Note: A probit regression model was used to predict the probability of dropout from sample membership and Bartlett factor scores (FS) for math self-efficacy. Following a two-stage path analysis (2S-PA) approach, FS were computed using the approximate invariance model determined via alignment optimization (AO) in the first stage to correct for measurement noninvariance. The scores were further corrected for unreliability in the second stage. The dotted lines indicate 95% confidence intervals. 
 
 \pagebreak
 ```{r echo=FALSE, results='hide', message = FALSE}
-plot_dropout(umx_tspa_mim, "MIM-2S-PA", -2, 2, 0.1) 
+plot_dropout(vcov(tspa_mim_fit), "MIM-2S-PA", -2, 2, 0.1)
 ```
 
-Note: A probit regression model was used to predict the probability of dropout from sample membership and Bartlett factor scores (FS) for math self-efficacy. Following a two-stage path analysis (2S-PA) approach, FS were computed using the partial invariance model determined via measuement invariance modeling (MIM) in the first stage to correct for measurement noninvariance. The scores were further corrected for unreliability in the second stage. The dotted lines indicate 95% confidence intervals.
+Note: A probit regression model was used to predict the probability of dropout from sample membership and Bartlett factor scores (FS) for math self-efficacy. Following a two-stage path analysis (2S-PA) approach, FS were computed using the partial invariance model determined via measurement invariance modeling (MIM) in the first stage to correct for measurement noninvariance. The scores were further corrected for unreliability in the second stage. The dotted lines indicate 95% confidence intervals.
 
 \pagebreak
 
 ```{r echo=FALSE, results='hide', message = FALSE}
-plot_dropout(umx_ao, "AO", -2, 2, 0.1)
+plot_dropout(vcov(ao_fit), "AO", -2, 2, 0.1)
 ```
 
 Note: A probit regression model was used to predict the probability of dropout from sample membership and Bartlett factor scores (FS) for math self-efficacy. FS were computed using the approximate invariance model determined via alignment optimization (AO). The scores were not corrected for unreliability. The dotted lines indicate 95% confidence intervals.
 \pagebreak
 
 ```{r echo=FALSE, results='hide', message = FALSE}
-plot_dropout(umx_mim, "MIM", -2, 2, 0.1)
+plot_dropout(vcov(mim_fit), "MIM", -2, 2, 0.1)
 ```
 
 
-Note: A probit regression model was used to predict the probability of dropout from sample membership and Bartlett factor scores (FS) for math self-efficacy. FS were computed using the partial invariance model determined via measuement invariance modeling (MIM). The scores were not corrected for unreliability. The dotted lines indicate 95% confidence intervals.
+Note: A probit regression model was used to predict the probability of dropout from sample membership and Bartlett factor scores (FS) for math self-efficacy. FS were computed using the partial invariance model determined via measurement invariance modeling (MIM). The scores were not corrected for unreliability. The dotted lines indicate 95% confidence intervals.
 \pagebreak
 
 ```{r echo=FALSE, results='hide', message = FALSE}
-plot_dropout(umx_mn, "Mean Score", -2, 2, 0.1)  
+plot_dropout(vcov(mn_fit), "MIM", -2, 2, 0.1)
 ```
 Note: A probit regression model was used to predict the probability of dropout from sample membership and composite mean scores (CMS) of the math self-efficacy test items. The scores were not corrected for measurement error or unreliability. The dotted lines indicate 95% confidence intervals.
 
@@ -195,25 +125,22 @@ cols <- c("#3498db","#16a085")
 cols_tspa <- c("#9b59b6" , "#D63F8D")
 
 # umx_out: output from umxRAM()
-pa_vs_2spa_preds <- function (umx_out, terms) {
+pa_vs_2spa_preds <- function (vcov, terms, approach) {
   # Make predictions for self-efficacy scores of seq(-2, 2, 0.1)
   new_self_eff <- seq(-2, 2, 0.1)
   # construct design matrices w columns for intercept, self-efficacy, ELS
   new_mat_els <- cbind(1, new_self_eff, rep(1, length(new_self_eff)))
   new_mat_hsls <- cbind(1, new_self_eff, rep(0, length(new_self_eff)))
   
-  umx_est_df <- get_path_ests_umx(terms, umx_out)
+  coefs <- as.numeric(probit_tb[c(1, 4, 7), approach])
   
   # predictions: Xnew %*% beta_hat
-  els_preds <- new_mat_els %*% umx_est_df[,1]
-  hsls_preds <- new_mat_hsls %*% umx_est_df[,1]
+  els_preds <- new_mat_els %*% coefs
+  hsls_preds <- new_mat_hsls %*% coefs
   
   # Var(predicted y) = xnew %*% V(beta-hat) %*% t(xnew)
-  v_betahat <- vcov(umx_out)[terms, terms]
-  v_betahat[2:3, 1] <- -v_betahat[2:3, 1] # flip the signs 
-  v_betahat[1, 2:3] <- -v_betahat[1, 2:3]
-  v_betahat 
-  
+  v_betahat <- vcov[terms, terms]
+
   se_preds_els <- apply(new_mat_els, 1, function(row) {
     row <- matrix(row, nrow = 1)
     sqrt(row %*% v_betahat %*% t(row))
@@ -233,10 +160,10 @@ pa_vs_2spa_preds <- function (umx_out, terms) {
               "lb_hsls" = lb_hsls, "ub_hsls" = ub_hsls))
 }
 
-ao_pa_preds <- pa_vs_2spa_preds(umx_ao, terms_pa)
-ao_tspa_preds <- pa_vs_2spa_preds(umx_tspa_ao, terms_2spa)
-mim_pa_preds <- pa_vs_2spa_preds(umx_mim, terms_pa)
-mim_tspa_preds <- pa_vs_2spa_preds(umx_tspa_mim, terms_2spa)
+ao_pa_preds <- pa_vs_2spa_preds(vcov(ao_fit), terms_pa, "AO")
+ao_tspa_preds <- pa_vs_2spa_preds(vcov(tspa_ao_fit), terms_2spa, "AO-2S-PA")
+mim_pa_preds <- pa_vs_2spa_preds(vcov(mim_fit), terms_pa, "MIM")
+mim_tspa_preds <- pa_vs_2spa_preds(vcov(tspa_mim_fit), terms_2spa, "MIM-2S-PA")
 ```
 
 
